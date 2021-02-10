@@ -119,8 +119,6 @@ class TIPGrammar : Grammar<AstNode>(){
     }
 
     val identifier: Parser<AIdentifier> by Cursor * -keywords * alpha use {
-        println(t1)
-        println(AIdentifier(t2.text, offset2Loc(t1)))
         AIdentifier(t2.text, offset2Loc(t1))
     }
 
@@ -146,14 +144,11 @@ class TIPGrammar : Grammar<AstNode>(){
     val pointersExpression: Parser<AExpr> by zeraryPointerExpression or unaryPointerExpression
 
     val program: Parser<AProgram> by Cursor * zeroOrMore(parser { tipFunction }) use {
-        println(t1)
-        println(AProgram(t2, offset2Loc(t1)))
         AProgram(t2, offset2Loc(t1))
     }
 
     val tipFunction: Parser<AFunDeclaration> by Cursor * identifier * leftParen *
             zeroOrMore(identifierDeclaration) * rightParen * parser { funBlock } use {
-        println(AFunDeclaration(t2.value, t4, t6, offset2Loc(t1)))
         AFunDeclaration(t2.value, t4, t6, offset2Loc(t1))
     }
 
