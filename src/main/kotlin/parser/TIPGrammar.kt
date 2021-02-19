@@ -6,46 +6,35 @@ import com.github.h0tk3y.betterParse.grammar.Grammar
 import com.github.h0tk3y.betterParse.grammar.parser
 import com.github.h0tk3y.betterParse.grammar.tryParseToEnd
 import com.github.h0tk3y.betterParse.lexer.*
-import com.github.h0tk3y.betterParse.parser.ParseResult
 import com.github.h0tk3y.betterParse.parser.Parsed
 import com.github.h0tk3y.betterParse.parser.Parser
 import java.io.File
-import java.lang.NullPointerException
-import kotlin.math.log
-
-class CursorValue(override val nextPosition: Int) : Parsed<Int>() {
-    override val value: Int get() = nextPosition
-}
-
-public object Cursor : Parser<Int> {
-    override fun tryParse(tokens: TokenMatchesSequence, fromPosition: Int): ParseResult<Int> {
-//        println(fromPosition)
-        return CursorValue(fromPosition)
-    }
-}
-
-fun offset2Loc(i: Int): Loc {
-    return Loc(i + 1, i + 1)
-}
 
 interface Comments : Parser<AstNode> {
     var lastBreaks: MutableList<Int>
 
     fun offset2Loc(i: Int): Loc {
-        val idx = lastBreaks.findLast { it <= i } ?: 0
-        return Loc(idx + 1, i - lastBreaks[idx] + 1)
+        val idx = lastBreaks.indexOfLast { it <= i }
+        return if (idx == -1) Loc(1, i - lastBreaks[0] + 1)
+        else Loc(idx + 1, i - lastBreaks[idx] + 1)
     }
 
-    val newLine: Token
+    val newLine: Parser<TokenMatch>
 
-    val nonClosing: Parser<List<Any>>
-
-    val blockComment: Parser<Any>
+    val blockComment: Token
 
     val comment: Parser<Any>
 }
 
-class TIPGrammar : Grammar<AstNode>(){
+class TIPGrammar : Grammar<AstNode>(), Comments {
+
+    val commentToken by regexToken("//[^\n\r]*")
+    val blockCommentToken by tokenBetween("/*", "*/", allowNested = true)
+    val newLineToken1 by regexToken("\r\n")
+    val newLineToken2 by regexToken("\n\r")
+    val newLineToken3 by regexToken("\r")
+    val newLineToken4 by regexToken("\n")
+    val space by regexToken("[ \t]")
 
     val allocToken by literalToken("alloc")
     val inputToken by literalToken("input")
@@ -57,126 +46,142 @@ class TIPGrammar : Grammar<AstNode>(){
     val nullToken by literalToken("null")
     val outputToken by literalToken("output")
     val errorToken by literalToken("error")
-    val digits by regexToken("-?\\d")
+    val digit by regexToken("\\d+")
     val leftParen by literalToken("(")
     val rightParen by literalToken(")")
     val leftBrace by literalToken("{")
     val rightBrace by literalToken("}")
-    val minus by literalToken("-") asJust Minus
-    val plus by literalToken("+") asJust Plus
     val alpha by regexToken("[a-zA-Z]+[a-zA-Z0-9]*")
-    val refOp by literalToken("&") asJust RefOp
-    val derefOp by literalToken("*") asJust DerefOp
-    val times by literalToken("*") asJust Times
-    val div by literalToken("/") asJust Divide
-    val greaterThan by literalToken(">") asJust GreaterThan
-    val eqq by literalToken("==") asJust Eqq
+    val minusToken by literalToken("-")
+    val plusToken by literalToken("+")
+    val refOpToken by literalToken("&")
+    val asterisc by literalToken("*")
+    val divToken by literalToken("/")
+    val greaterThanToken by literalToken(">")
+    val eqqToken by regexToken("==")
     val assgn by literalToken("=")
     val semicol by literalToken(";")
-    val blockCommentStart by literalToken("/*")
-    val blockCommentEnd by literalToken("*/")
-    val doubleSlash by literalToken("//")
-
-    val ws by regexToken("[ \t\n]", ignore = true)
+    val comma by literalToken(",")
 
     override val rootParser by parser { program }
 
-//    override var lastBreaks: MutableList<Int> = mutableListOf(0)
-//
-//    override val newLine by regexToken("[\r\n]")
-//
-//    override val nonClosing: Parser<List<Any>> by zeroOrMore(times * -div or newLine)
-//
-//    override val blockComment: Parser<Any> by blockCommentStart * parser { blockComment } or nonClosing * blockCommentEnd
-//
-//    override val comment by blockComment or doubleSlash * newLine
-//
-//    val ws by newLine or regexToken(" \t\n") or comment
+    override var lastBreaks: MutableList<Int> = mutableListOf(0)
 
-//    val optSpace by zeroOrMore(ws)
-
-    val keywords by
-    allocToken or inputToken or whileToken or ifToken or elseToken or varToken or returnToken or nullToken or outputToken
-
-    val operation: Parser<AExpr> by parser { term } *
-            optional((Cursor * plus * parser { expression }) or (Cursor * minus * parser { expression })) use {
-        t2?.let { ABinaryOp(it.t2, t1, it.t3, offset2Loc(it.t1)) } ?: t1
+    override val newLine by Cursor * (newLineToken1 or newLineToken2 or newLineToken3 or newLineToken4) map { (cur, token) ->
+        lastBreaks.add(cur)
+        token
     }
 
-    val expression: Parser<AExpr> by parser { operation } *
-            optional((Cursor * greaterThan * parser { operation }) or (Cursor * eqq * parser { operation })) use {
-        t2?.let { ABinaryOp(it.t2, t1, it.t3, offset2Loc(it.t1)) } ?: t1
+    override val blockComment by blockCommentToken
+
+    override val comment by blockComment or commentToken * newLine
+
+    val WS by newLine or space or comment
+
+    val optSpace by zeroOrMore(WS)
+
+    fun wspStr(s: Parser<TokenMatch>) = -optSpace * s * -optSpace
+
+    val minus by wspStr(minusToken) asJust Minus
+    val plus by wspStr(plusToken) asJust Plus
+    val refOp by wspStr(refOpToken) asJust RefOp
+    val times: Parser<Times> by wspStr(asterisc) asJust Times
+    val derefOp by wspStr(asterisc) asJust DerefOp
+    val divide by wspStr(divToken) asJust Divide
+    val greaterThan by wspStr(greaterThanToken) asJust GreaterThan
+    val eqq by wspStr(eqqToken) asJust Eqq
+
+    val operation: Parser<AExpr> by parser { term } * optional((Cursor * plus * parser { expression }) or (Cursor * minus * parser { expression })) map { (left, op) ->
+        op?.let { (cur, binOp, right) ->
+            ABinaryOp(binOp, left, right, offset2Loc(cur))
+        } ?: left
     }
 
-    val parens: Parser<AExpr> by -leftParen * expression * -rightParen
+    val expression: Parser<AExpr> by parser { operation } * optional((Cursor * greaterThan * parser { operation }) or (Cursor * eqq * parser { operation })) map { (left, op) ->
+        op?.let { (cur, binOp, right) ->
+            ABinaryOp(binOp, left, right, offset2Loc(cur))
+        } ?: left
+    }
 
-    val number: Parser<AExpr> by Cursor * digits use {
-        ANumber(t2.value.text.toInt(), offset2Loc(t1))
+    val parens: Parser<AExpr> by -wspStr(leftParen) * expression * -wspStr(rightParen)
+
+    val digits: Parser<Int> by optional(minusToken) * digit map { (min, num) ->
+        min?.run { num.value.text.toInt() * -1 } ?: num.value.text.toInt()
+    }
+
+    val number: Parser<AExpr> by Cursor * digits map { (cur, num) ->
+        ANumber(num, offset2Loc(cur))
     }
 
     val atom by parser { funApp } or number or parens or parser { identifier } or
-            (Cursor * inputToken use { AInput(offset2Loc(t1)) }) or parser { pointersExpression }
+            (Cursor * wspStr(inputToken) use { AInput(offset2Loc(t1)) }) or parser { pointersExpression }
 
-    val term: Parser<AExpr> by atom *
-            optional((Cursor * times * parser { term }) * (Cursor * div * parser { term })) use {
-        t2?.let { ABinaryOp(it.t2, t1, it.t3, offset2Loc(it.t1)) } ?: t1
+    val term: Parser<AExpr> by atom * optional((Cursor * times * parser { term }) or (Cursor * divide * parser { term })) map { (left, op) ->
+        op?.let { (cur, binOp, right) ->
+            ABinaryOp(binOp, left, right, offset2Loc(cur))
+        } ?: left
     }
 
-    val identifier: Parser<AIdentifier> by Cursor * alpha use {
-        AIdentifier(t2.text, offset2Loc(t1))
+    val identifier: Parser<AIdentifier> by Cursor * -optSpace * alpha map { (cur, id) ->
+        AIdentifier(id.text, offset2Loc(cur))
     }
 
-    val identifierDeclaration: Parser<AIdentifierDeclaration> by Cursor * alpha use {
-        AIdentifierDeclaration(t2.text, offset2Loc(t1))
+    val identifierDeclaration: Parser<AIdentifierDeclaration> by Cursor * -optSpace * alpha map { (cur, id) ->
+        AIdentifierDeclaration(id.text, offset2Loc(cur))
     }
 
-    val leftHandUnaryPointerExpression by Cursor * derefOp * parser { atom } use {
-        AUnaryOp(t2, t3, offset2Loc(t1))
+    val leftHandUnaryPointerExpression by Cursor * derefOp * parser { atom } map { (cur, op, expr) ->
+        AUnaryOp(op, expr, offset2Loc(cur))
     }
 
     val assignableExpression: Parser<Assignable<DerefOp>> by identifier or leftHandUnaryPointerExpression
 
-    val zeraryPointerExpression by (Cursor * allocToken) or (Cursor * nullToken) use {
-        if (t2.text == allocToken.name) AAlloc(offset2Loc(t1))
-        else ANull(offset2Loc(t1))
+    val zeraryPointerExpression by (Cursor * wspStr(allocToken)) or (Cursor * wspStr(nullToken)) map { (cur, token) ->
+        if (token.text == allocToken.name) AAlloc(offset2Loc(cur))
+        else ANull(offset2Loc(cur))
     }
 
-    val unaryPointerExpression by (Cursor * refOp * identifier) or (Cursor * derefOp * parser { atom }) use {
-        AUnaryOp(t2, t3, offset2Loc(t1))
+    val unaryPointerExpression by (Cursor * refOp * identifier) or (Cursor * derefOp * parser { atom }) map { (cur, op, expr) ->
+        AUnaryOp(op, expr, offset2Loc(cur))
     }
 
     val pointersExpression: Parser<AExpr> by zeraryPointerExpression or unaryPointerExpression
 
-    val assignment: Parser<AStmtInNestedBlock> by Cursor * assignableExpression * assgn * expression * semicol use {
-        AAssignStmt(t2, t4, offset2Loc(t1))
+    val assignment: Parser<AStmtInNestedBlock> by Cursor * assignableExpression * -wspStr(assgn) * expression * -wspStr(semicol) map { (cur, left, right) ->
+        AAssignStmt(left, right, offset2Loc(cur))
     }
 
-    val block: Parser<AStmtInNestedBlock> by Cursor * -leftBrace * parser { statements } * -rightBrace use {
-        ANestedBlockStmt(t2, offset2Loc(t1))
+    val block: Parser<AStmtInNestedBlock> by Cursor * -wspStr(leftBrace) * parser { statements } * -wspStr(rightBrace) map { (cur, stmts) ->
+        ANestedBlockStmt(stmts, offset2Loc(cur))
     }
 
-    val declaration: Parser<AVarStmt> by Cursor * varToken * oneOrMore(identifierDeclaration) * semicol use {
-        AVarStmt(t3, offset2Loc(t1))
+    val declaration: Parser<AVarStmt> by Cursor * -wspStr(varToken) * separatedTerms(identifierDeclaration, comma) * -wspStr(semicol) map { (cur, ids) ->
+        AVarStmt(ids, offset2Loc(cur))
     }
 
-    val whileParser: Parser<AStmtInNestedBlock> by Cursor * whileToken * -leftParen * expression * -rightParen * parser { statement } use {
-        AWhileStmt(t3, t4, offset2Loc(t1))
+    val whileParser: Parser<AStmtInNestedBlock> by Cursor * -wspStr(whileToken) * -wspStr(leftParen) * expression * -wspStr(rightParen) *
+            parser { statement } map { (cur, expr, stmts) ->
+        AWhileStmt(expr, stmts, offset2Loc(cur))
     }
 
-    val ifParser: Parser<AStmtInNestedBlock> by Cursor * ifToken * leftParen * expression * rightParen * parser { statement } *
-            optional(elseToken * parser { statement }) use {
-        AIfStmt(t4, t6, t7!!.t2, offset2Loc(t1))
+    val ifParser: Parser<AStmtInNestedBlock> by Cursor * -wspStr(ifToken) * -wspStr(leftParen) * expression *
+            -wspStr(rightParen) * parser { statement } * optional(-elseToken * parser { statement }) map { (cur, expr, stmts, els) ->
+        AIfStmt(expr, stmts, els, offset2Loc(cur))
     }
 
-    val outputParser: Parser<AStmtInNestedBlock> by Cursor * outputToken * expression * semicol use {
-        AOutputStmt(t3, offset2Loc(t1))
+    val outputParser: Parser<AStmtInNestedBlock> by Cursor * -wspStr(outputToken) * expression * -wspStr(semicol) map { (cur, expr) ->
+        AOutputStmt(expr, offset2Loc(cur))
     }
 
-    val returnParser by Cursor * returnToken * expression * semicol use { AReturnStmt(t3, offset2Loc(t1)) }
+    val returnParser by Cursor * -wspStr(returnToken) * expression * -wspStr(semicol) map { (cur, expr) ->
+        AReturnStmt(expr, offset2Loc(cur))
+    }
 
-    val errorParser by Cursor * errorToken * expression * semicol use { AErrorStmt(t3, offset2Loc(t1)) }
+    val errorParser by Cursor * -wspStr(errorToken) * expression * -wspStr(semicol) map { (cur, expr) ->
+        AErrorStmt(expr, offset2Loc(cur))
+    }
 
-    val funActualArgs: Parser<List<AExpr>> by -leftParen and zeroOrMore(expression) and -rightParen
+    val funActualArgs by -wspStr(leftParen) and separatedTerms(expression, comma, acceptZero = true) and -wspStr(rightParen)
 
     val funApp: Parser<AExpr> by (Cursor * parens * funActualArgs) or (Cursor * identifier * funActualArgs) map { (cur, id, args) ->
         if (id == parens) ACallFuncExpr(id, args, true, offset2Loc(cur))
@@ -189,17 +194,17 @@ class TIPGrammar : Grammar<AstNode>(){
 
     val varStatements by zeroOrMore(declaration)
 
-    val funBlock: Parser<AFunBlockStmt> by Cursor * -leftBrace * varStatements * statements * returnParser * -rightBrace use {
-        AFunBlockStmt(t2, t3, t4, offset2Loc(t1))
+    val funBlock: Parser<AFunBlockStmt> by Cursor * -wspStr(leftBrace) * varStatements * statements * returnParser * -wspStr(rightBrace) map { (cur, varStmt, stmts, retrn) ->
+        AFunBlockStmt(varStmt, stmts, retrn, offset2Loc(cur))
     }
 
-    val tipFunction: Parser<AFunDeclaration> by Cursor * identifier * leftParen * zeroOrMore(identifierDeclaration) *
-            rightParen * funBlock use {
-        AFunDeclaration(t2.value, t4, t6, offset2Loc(t1))
+    val tipFunction: Parser<AFunDeclaration> by Cursor * identifier * -wspStr(leftParen) *
+            separatedTerms(identifierDeclaration, comma, true) * -wspStr(rightParen) * funBlock map { (cur, id, args, block) ->
+        AFunDeclaration(id.value, args, block, offset2Loc(cur))
     }
 
-    val program: Parser<AProgram> by Cursor * zeroOrMore(tipFunction) use {
-        AProgram(t2, offset2Loc(t1))
+    val program: Parser<AProgram> by Cursor * zeroOrMore(tipFunction) map { (cur, funs) ->
+        AProgram(funs, offset2Loc(cur))
     }
 }
 
@@ -208,11 +213,16 @@ fun main() {
     var success = 0
     var failure = 0
     File("examples/").walk().forEach { file ->
-        println("\n${file.name}")
-        if (file.isFile) {
-            val text = file.readText(Charsets.UTF_8)
-            println(grammar.tryParseToEnd(text) is Parsed)
-            if (grammar.tryParseToEnd(text) is Parsed) success++ else failure++
+        if (file.isFile && file.name != "code.tip") {
+            val text = file.readText()
+            grammar.lastBreaks = mutableListOf(0)
+            val res = grammar.tryParseToEnd(text)
+            println("${file.name} – $res")
+            if (res is Parsed) success++
+            else {
+                failure++
+                println(file.name)
+            }
         }
     }
     println("\nSuccess = $success, failure = $failure")
