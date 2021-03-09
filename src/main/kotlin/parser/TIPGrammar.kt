@@ -29,7 +29,7 @@ interface Comments : Parser<AstNode> {
 class TIPGrammar : Grammar<AstNode>(), Comments {
 
     val commentToken by regexToken("//[^\n\r]*")
-    val blockCommentToken by tokenBetween("/*", "*/", allowNested = true)
+    val blockCommentToken by tokenBetween("/*", "*/", allowNested = false)
     val newLineToken1 by regexToken("\r\n")
     val newLineToken2 by regexToken("\n\r")
     val newLineToken3 by regexToken("\r")
@@ -136,12 +136,12 @@ class TIPGrammar : Grammar<AstNode>(), Comments {
 
     val assignableExpression: Parser<Assignable<DerefOp>> by identifier or leftHandUnaryPointerExpression
 
-    val zeraryPointerExpression by (Cursor * wspStr(allocToken)) or (Cursor * wspStr(nullToken)) map { (cur, token) ->
+    val zeraryPointerExpression: Parser<AExpr> by (Cursor * wspStr(allocToken)) or (Cursor * wspStr(nullToken)) map { (cur, token) ->
         if (token.text == allocToken.name) AAlloc(offset2Loc(cur))
         else ANull(offset2Loc(cur))
     }
 
-    val unaryPointerExpression by (Cursor * refOp * identifier) or (Cursor * derefOp * parser { atom }) map { (cur, op, expr) ->
+    val unaryPointerExpression: Parser<AExpr> by (Cursor * refOp * identifier) or (Cursor * derefOp * parser { atom }) map { (cur, op, expr) ->
         AUnaryOp(op, expr, offset2Loc(cur))
     }
 
@@ -213,7 +213,7 @@ fun main() {
     var success = 0
     var failure = 0
     File("examples/").walk().forEach { file ->
-        if (file.isFile && file.name != "code.tip") {
+        if (file.isFile) {
             val text = file.readText()
             grammar.lastBreaks = mutableListOf(0)
             val res = grammar.tryParseToEnd(text)

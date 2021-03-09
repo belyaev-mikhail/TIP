@@ -48,9 +48,8 @@ object FragmentCfgObj {
                     val trueBranch = recGen(node.ifBranch)
                     val falseBranch = node.elseBranch?.let { recGen(it) }
                     val guardedTrue = ifGuard.concat(trueBranch)
-                    val guardedFalse = falseBranch?.let { ifGuard.concat(it) }
-//                    guardedFalse?.fold(guardedTrue.union(ifGuard)) { gf -> guardedTrue.union(gf) }
-                    nodeBuilder(CfgStmtNode(data = node))
+                    val guardedFalse = listOf(falseBranch?.let { ifGuard.concat(it) })
+                    guardedFalse.fold(guardedTrue.union(ifGuard)) { gf, _ -> guardedTrue.union(gf) }
                 }
                 is AOutputStmt -> nodeBuilder(CfgStmtNode(data = node))
                 is AReturnStmt -> nodeBuilder(CfgStmtNode(data = node))
