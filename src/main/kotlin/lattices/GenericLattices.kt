@@ -38,7 +38,7 @@ interface Lattice<T> {
 /**
  * The `n`-th product lattice made of `sublattice` lattices.
  */
-class UniformProductLattice<out L : Lattice<Any>>(val sublattice: L, n: Int) : Lattice<List<Any>> {
+class UniformProductLattice<L : Lattice<Any>>(val sublattice: L, n: Int) : Lattice<List<Any>> {
 
     override val bottom = (1..n).map { sublattice.bottom }
 
@@ -84,14 +84,11 @@ open class FlatLattice<X> : Lattice<FlatLattice.FlatElement> {
      * If the element is Top or Bot then IllegalArgumentException is thrown.
      * Note that this method is declared as implicit, so the conversion can be done automatically.
      */
-    fun unlift(a: FlatEl<X>): X = when (a) {
-        is FlatElement -> a.el
-        else -> throw IllegalArgumentException("cannot unlift $a")
-    }
+    fun unlift(a: FlatEl<X>): X = a.el
 
-    override val top = Top
+    override val top: FlatElement = Top
 
-    override val bottom = Bot
+    override val bottom: FlatElement = Bot
 
     override fun lub(x: FlatElement, y: FlatElement): FlatElement =
         if (x == Bot || y == Top || x == y)
@@ -105,7 +102,7 @@ open class FlatLattice<X> : Lattice<FlatLattice.FlatElement> {
 /**
  * The product lattice made by `l1` and `l2`.
  */
-class PairLattice<out L1 : Lattice<Any>, out L2 : Lattice<Any>>(val sublattice1: L1, val sublattice2: L2) : Lattice<Pair<Any, Any>> {
+class PairLattice<L1 : Lattice<Any>, L2 : Lattice<Any>>(val sublattice1: L1, val sublattice2: L2) : Lattice<Pair<Any, Any>> {
 
     override val bottom: Pair<Any, Any> = Pair(sublattice1.bottom, sublattice2.bottom)
 
@@ -124,12 +121,8 @@ class MapLattice<A, out L : Lattice<Any>>(ch: (A) -> Boolean, val sublattice: L)
 
     override val bottom: Map<A, Any> = mutableMapOf<A, Any>().withDefault { sublattice.bottom }
 
-    override fun lub(x: Map<A, Any>, y: Map<A, Any>): Map<A, Any> {
-        x.keys.fold(y) { m, a ->
-            val r: Any = sublattice.lub(x[a]!!, y[a]!!)
-            val rr: Map<A, Any> = m.plus()
-        }
-    }
+    override fun lub(x: Map<A, Any>, y: Map<A, Any>): Map<A, Any> =
+        x.keys.fold(y) { m, a -> m + Pair(a, sublattice.lub(x[a]!!, y[a]!!)) }.withDefault { sublattice.bottom }
 }
 
 /**
